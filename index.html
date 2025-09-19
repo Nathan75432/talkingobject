@@ -17,7 +17,7 @@
     #chatBox { margin-top: 15px; }
     #chatInput { padding: 8px; width: 60%; border-radius: 6px; border: none; }
     #chatSend { padding: 8px 15px; border: none; border-radius: 6px; background: dodgerblue; color: white; }
-    #chatLog { margin: 10px; max-height: 200px; overflow-y: auto; text-align: left; background: #222; padding: 10px; border-radius: 8px; }
+    #chatLog { margin: 10px auto; max-width: 480px; max-height: 200px; overflow-y: auto; text-align: left; background: #222; padding: 10px; border-radius: 8px; }
     #chatLog p { margin: 5px 0; }
   </style>
   <!-- TensorFlow.js -->
@@ -43,6 +43,26 @@
   </div>
   <div id="chatLog"></div>
 
+  <!-- Load Transformers.js for GPT -->
+  <script type="module">
+    import { pipeline } from "https://cdn.jsdelivr.net/npm/@xenova/transformers";
+
+    let generator;
+    (async () => {
+      const statusDiv = document.getElementById("status");
+      statusDiv.innerText = "Loading GPT model (first load may take ~10s)...";
+      generator = await pipeline("text-generation", "Xenova/distilgpt2");
+      statusDiv.innerText = "GPT ready 🧠";
+    })();
+
+    // Hook into global scope so the rest of the code can call it
+    window.generateAIResponse = async function(prompt) {
+      if (!generator) return "(AI still loading...)";
+      const output = await generator(prompt, { max_new_tokens: 30 });
+      return output[0].generated_text;
+    }
+  </script>
+
   <script>
     const video = document.getElementById('camera');
     const canvas = document.getElementById('overlay');
@@ -60,37 +80,27 @@
     let listening = false;
     let useAI = false;
 
-    // Dictionary (trimmed for example, but you can paste the full 90-class version here)
+    // Small demo dictionary
     const responses = {
       "person": {"hi":"Hi there, human!","hello":"Hello! Nice to meet you.","what are you":"I’m a person, just like you."},
-      "dog": {"hi":"Woof! Hi friend!","hello":"Hello! Tail wagging.","sit":"Woof! I’ll sit down now.","what are you":"I’m a dog — man’s best friend."},
+      "dog": {"hi":"Woof! Hi friend!","hello":"Hello! Tail wagging.","what are you":"I’m a dog — man’s best friend."},
       "cat": {"hi":"Meow! Hello human!","hello":"Purr... hello!","what are you":"I’m a cat — I rule the house."},
-      "car": {"hi":"Vroom vroom! Hi, I’m a car.","hello":"Hello! Buckle up.","what are you":"I’m a car — I drive fast."},
-      "pizza": {"hi":"Cheesy hi!","hello":"Hello, I’m pizza.","what are you":"I’m pizza — everyone loves me."},
       "default": {"hi":"Hello there!","hello":"Hi, nice to see you!","what are you":"I’m just an object."}
     };
 
-    // AI toggle
     function toggleAI() {
       useAI = !useAI;
       document.getElementById("aiToggleBtn").innerText = useAI ? "Mode: Language Model 🧠" : "Mode: Canned Replies 🤖";
     }
 
-    // Placeholder AI (replace later with GPT)
-    async function generateAIResponse(prompt) {
-      return "🤖 (AI mode): You said '" + prompt + "', I’m thinking about it!";
-    }
-
-    // Unified reply handler
     async function getReply(obj, userSpeech) {
       if (useAI) {
-        return await generateAIResponse(userSpeech);
+        return await window.generateAIResponse(userSpeech);
       } else {
-        return responses[obj][userSpeech] || responses[obj]["hi"] || responses["default"]["hi"];
+        return responses[obj]?.[userSpeech] || responses[obj]?.hi || responses["default"].hi;
       }
     }
 
-    // Enable speech
     function enableSpeech() {
       const msg = new SpeechSynthesisUtterance("Speech enabled");
       msg.lang = "en-US";
@@ -99,13 +109,11 @@
       statusDiv.innerText = "Speech ready ✅";
     }
 
-    // Toggle funny/serious
     function toggleMode() {
       funnyMode = !funnyMode;
       document.getElementById('toggleBtn').innerText = funnyMode ? "Mode: Funny 🤪" : "Mode: Serious";
     }
 
-    // Speak
     function speak(text) {
       if (!speechEnabled || !window.speechSynthesis) return;
       window.speechSynthesis.cancel();
@@ -122,26 +130,18 @@
       recognition = new SpeechRecognition();
       recognition.continuous = false;
       recognition.lang = "en-US";
-
       recognition.onresult = async (event) => {
         const userSpeech = event.results[0][0].transcript.toLowerCase();
         statusDiv.innerText = `You said: "${userSpeech}"`;
-
-        let obj = "default";
-        for (let key in responses) {
-          if (lastSpoken.includes(key)) { obj = key; break; }
-        }
-
+        let obj = lastSpoken.includes("dog") ? "dog" : lastSpoken.includes("cat") ? "cat" : "default";
         let reply = await getReply(obj, userSpeech);
         logChat("You", userSpeech);
         logChat(obj, reply);
         speak(reply);
-
-        if (listening) recognition.start(); // auto restart
+        if (listening) recognition.start();
       };
     }
 
-    // Toggle listening
     function toggleListening() {
       if (!recognition) {
         alert("Speech recognition not supported in this browser.");
@@ -161,32 +161,24 @@
       }
     }
 
-    // Chat input
     async function sendChat() {
       const input = document.getElementById("chatInput");
       const message = input.value.toLowerCase().trim();
       if (!message) return;
       input.value = "";
-
-      let obj = "default";
-      for (let key in responses) {
-        if (lastSpoken.includes(key)) { obj = key; break; }
-      }
-
-      let reply = await getReply(obj, message);
       logChat("You", message);
+      let obj = "default";
+      let reply = await getReply(obj, message);
       logChat(obj, reply);
       speak(reply);
     }
 
-    // Chat log
     function logChat(sender, text) {
       const log = document.getElementById("chatLog");
       log.innerHTML += `<p><b>${sender}:</b> ${text}</p>`;
       log.scrollTop = log.scrollHeight;
     }
 
-    // Camera + model
     async function initCamera() {
       const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } });
       video.srcObject = stream;
@@ -203,13 +195,11 @@
       statusDiv.innerText = "Model ready ✅ (tap Start Talking)";
     }
 
-    // Detection loop
     async function detectLoop() {
       if (!model) return;
       const predictions = await model.detect(video);
       ctx.clearRect(0, 0, canvas.width, canvas.height);
       ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-
       if (predictions.length > 0) {
         predictions.forEach(pred => {
           ctx.strokeStyle = "lime";
@@ -218,7 +208,6 @@
           ctx.fillStyle = "lime";
           ctx.fillText(`${pred.class} (${Math.round(pred.score*100)}%)`, pred.bbox[0], pred.bbox[1] > 10 ? pred.bbox[1]-5 : 10);
         });
-
         const now = Date.now();
         const names = predictions.filter(p => p.score > 0.6).map(p => p.class);
         if (names.length > 0) {
