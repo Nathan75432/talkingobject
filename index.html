@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Talking Object Detector</title>
+  <style>
+    body { margin: 0; text-align: center; background: #111; color: white; font-family: sans-serif; }
+    video, canvas { width: 100%; max-width: 480px; margin-top: 10px; border-radius: 12px; }
+    #status { margin: 10px; font-size: 18px; }
+    button { margin: 10px; padding: 10px 20px; font-size: 16px; border: none; border-radius: 8px; background: lime; color: black; cursor: pointer; }
+  </style>
+  <!-- TensorFlow.js -->
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@latest"></script>
+  <!-- COCO-SSD model -->
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd"></script>
+</head>
+<body>
+  <h1>Talking Object Detector 🤖</h1>
+  <button onclick="enableSpeech()">Start Talking 🔊</button>
+  <video id="camera" autoplay playsinline muted></video>
+  <canvas id="overlay"></canvas>
+  <div id="status">Loading model...</div>
+
+  <script>
+    const video = document.getElementById('camera');
+    const canvas = document.getElementById('overlay');
+    const ctx = canvas.getContext('2d');
+    const statusDiv = document.getElementById('status');
+    let model;
+
+    // Remember last spoken object + time
+    let lastSpoken = "";
+    let lastSpokenTime = 0;
+    const cooldown = 5000; // 5 seconds
+
+    let speechEnabled = false;
+
+    // 1. Access camera
+    async function initCamera() {
+      const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } });
+      video.srcObject = stream;
+      return new Promise(resolve => video.onloadedmetadata = () => {
+        video.play();
+        canvas.width = video.videoWidth;
+        canvas.height = video.videoHeight;
+        resolve();
+      });
+    }
+
+    // 2. Load COCO-SSD
+    async function loadModel() {
+      try {
+        model = await cocoSsd.load();
+        statusDiv.innerText = "Model ready ✅ (tap Start Talking)";
+      } catch (err) {
+        statusDiv.innerText = "❌ Error loading model";
+        console.error(err);
+      }
+    }
+
+    // 3. Enable speech (must tap once on iOS)
+    function enableSpeech() {
+      const msg = new SpeechSynthesisUtterance("Speech enabled");
+      msg.lang = "en-US";
+      window.speechSynthesis.speak(msg);
+      speechEnabled = true;
+      statusDiv.innerText = "Speech ready ✅";
+    }
+
+    // 4. Speech function
+    function speak(text) {
+      if (!speechEnabled) return;
+      if (!window.speechSynthesis) return;
+
+      window.speechSynthesis.cancel(); // cancel any ongoing speech
+      const msg = new SpeechSynthesisUtterance(text);
+      msg.lang = "en-US";
+      msg.rate = 0.9;
+      window.speechSynthesis.speak(msg);
+    }
+
+    // 5. Detection loop
+    async function detectLoop() {
+      if (!model) return;
+
+      const predictions = await model.detect(video);
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+      if (predictions.length > 0) {
+        predictions.forEach(pred => {
+          // Draw box
+          ctx.strokeStyle = "lime";
+          ctx.lineWidth = 2;
+          ctx.strokeRect(...pred.bbox);
+          ctx.fillStyle = "lime";
+          ctx.fillText(`${pred.class} (${Math.round(pred.score*100)}%)`, pred.bbox[0], pred.bbox[1] > 10 ? pred.bbox[1]-5 : 10);
+        });
+
+        const best = predictions[0]; // highest confidence
+        const now = Date.now();
+
+        if (best.score > 0.6) {
+          if (best.class !== lastSpoken || (now - lastSpokenTime) > cooldown) {
+            speak(`I see a ${best.class}`);
+            statusDiv.innerText = `Detected: ${best.class}`;
+            lastSpoken = best.class;
+            lastSpokenTime = now;
+          }
+        }
+      } else {
+        statusDiv.innerText = "No objects detected";
+      }
+
+      requestAnimationFrame(detectLoop);
+    }
+
+    // 6. Initialize
+    (async () => {
+      await initCamera();
+      await loadModel();
+      detectLoop();
+    })();
+  </script>
+</body>
+</html>
