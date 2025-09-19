@@ -10,6 +10,7 @@
     button { margin: 5px; padding: 10px 20px; font-size: 16px; border: none; border-radius: 8px; cursor: pointer; }
     #startBtn { background: lime; color: black; }
     #toggleBtn { background: dodgerblue; color: white; }
+    #talkBtn { background: orange; color: black; }
   </style>
   <!-- TensorFlow.js -->
   <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@latest"></script>
@@ -20,6 +21,7 @@
   <h1>Talking Object Detector 🤖</h1>
   <button id="startBtn" onclick="enableSpeech()">Start Talking 🔊</button>
   <button id="toggleBtn" onclick="toggleMode()">Mode: Serious</button>
+  <button id="talkBtn" onclick="listenToUser()">Talk to Object 🎤</button>
   <video id="camera" autoplay playsinline muted></video>
   <canvas id="overlay"></canvas>
   <div id="status">Loading model...</div>
@@ -34,7 +36,7 @@
     // State
     let lastSpoken = "";
     let lastSpokenTime = 0;
-    const cooldown = 5000; // ms
+    const cooldown = 5000;
     let speechEnabled = false;
     let funnyMode = false;
 
@@ -45,6 +47,16 @@
       "person": ["Hello there!", "I see you!", "Looking good today!"],
       "book": ["I am a book!", "Read me!", "Knowledge is power!"],
       "chair": ["I’m a chair!", "Take a seat!", "Rest those legs!"]
+    };
+
+    // "Hi" responses for every object
+    const hiResponses = {
+      "cat": "Meow! Hello human!",
+      "dog": "Woof! Hi friend!",
+      "person": "Hi there! Nice to meet you!",
+      "book": "Hello! I’m full of stories.",
+      "chair": "Hi! Take a seat if you like.",
+      "default": "Hello! I’m happy to see you."
     };
 
     // 1. Camera setup
@@ -95,7 +107,51 @@
       window.speechSynthesis.speak(msg);
     }
 
-    // 6. Detection loop
+    // 6. Speech recognition setup
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    let recognition;
+    if (SpeechRecognition) {
+      recognition = new SpeechRecognition();
+      recognition.continuous = false;
+      recognition.lang = "en-US";
+
+      recognition.onresult = (event) => {
+        const userSpeech = event.results[0][0].transcript.toLowerCase();
+        statusDiv.innerText = `You said: "${userSpeech}"`;
+
+        // Check if user said "hi" or "hello"
+        if (userSpeech.includes("hi") || userSpeech.includes("hello")) {
+          let response;
+          if (lastSpoken.includes("cat")) {
+            response = hiResponses["cat"];
+          } else if (lastSpoken.includes("dog")) {
+            response = hiResponses["dog"];
+          } else if (lastSpoken.includes("person")) {
+            response = hiResponses["person"];
+          } else if (lastSpoken.includes("book")) {
+            response = hiResponses["book"];
+          } else if (lastSpoken.includes("chair")) {
+            response = hiResponses["chair"];
+          } else {
+            response = hiResponses["default"];
+          }
+          speak(response);
+        } else {
+          speak("I heard you say " + userSpeech);
+        }
+      };
+    }
+
+    function listenToUser() {
+      if (!recognition) {
+        alert("Speech recognition not supported in this browser.");
+        return;
+      }
+      recognition.start();
+      statusDiv.innerText = "🎤 Listening...";
+    }
+
+    // 7. Detection loop
     async function detectLoop() {
       if (!model) return;
 
@@ -112,20 +168,27 @@
           ctx.fillText(`${pred.class} (${Math.round(pred.score*100)}%)`, pred.bbox[0], pred.bbox[1] > 10 ? pred.bbox[1]-5 : 10);
         });
 
-        const best = predictions[0];
         const now = Date.now();
+        const names = predictions.filter(p => p.score > 0.6).map(p => p.class);
 
-        if (best.score > 0.6) {
-          if (best.class !== lastSpoken || (now - lastSpokenTime) > cooldown) {
+        if (names.length > 0) {
+          const objectsSeen = names.join(", ");
+          if (objectsSeen !== lastSpoken || (now - lastSpokenTime) > cooldown) {
             let phrase;
-            if (funnyMode && phrases[best.class]) {
-              phrase = phrases[best.class][Math.floor(Math.random() * phrases[best.class].length)];
+            if (funnyMode) {
+              phrase = names.map(obj => {
+                if (phrases[obj]) {
+                  return phrases[obj][Math.floor(Math.random() * phrases[obj].length)];
+                } else {
+                  return `I see a ${obj}`;
+                }
+              }).join(" And ");
             } else {
-              phrase = `I see a ${best.class}`;
+              phrase = names.length === 1 ? `I see a ${names[0]}` : `I see ${names.join(" and ")}`;
             }
             speak(phrase);
-            statusDiv.innerText = `Detected: ${best.class}`;
-            lastSpoken = best.class;
+            statusDiv.innerText = `Detected: ${objectsSeen}`;
+            lastSpoken = objectsSeen;
             lastSpokenTime = now;
           }
         }
@@ -136,7 +199,7 @@
       requestAnimationFrame(detectLoop);
     }
 
-    // 7. Init
+    // 8. Init
     (async () => {
       await initCamera();
       await loadModel();
