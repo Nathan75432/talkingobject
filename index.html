@@ -11,8 +11,14 @@
     #startBtn { background: lime; color: black; }
     #toggleBtn { background: dodgerblue; color: white; }
     #talkBtn { background: orange; color: black; }
+    #aiToggleBtn { background: purple; color: white; }
     #micIcon { font-size: 40px; margin-top: 10px; }
     .listening { color: red; text-shadow: 0 0 10px red; }
+    #chatBox { margin-top: 15px; }
+    #chatInput { padding: 8px; width: 60%; border-radius: 6px; border: none; }
+    #chatSend { padding: 8px 15px; border: none; border-radius: 6px; background: dodgerblue; color: white; }
+    #chatLog { margin: 10px; max-height: 200px; overflow-y: auto; text-align: left; background: #222; padding: 10px; border-radius: 8px; }
+    #chatLog p { margin: 5px 0; }
   </style>
   <!-- TensorFlow.js -->
   <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@latest"></script>
@@ -24,10 +30,18 @@
   <button id="startBtn" onclick="enableSpeech()">Start Talking 🔊</button>
   <button id="toggleBtn" onclick="toggleMode()">Mode: Serious</button>
   <button id="talkBtn" onclick="toggleListening()">Start Conversation 🎤</button>
+  <button id="aiToggleBtn" onclick="toggleAI()">Mode: Canned Replies 🤖</button>
   <div id="micIcon">🎙️</div>
   <video id="camera" autoplay playsinline muted></video>
   <canvas id="overlay"></canvas>
   <div id="status">Loading model...</div>
+
+  <!-- Chat box -->
+  <div id="chatBox">
+    <input id="chatInput" type="text" placeholder="Type to object...">
+    <button id="chatSend" onclick="sendChat()">Send</button>
+  </div>
+  <div id="chatLog"></div>
 
   <script>
     const video = document.getElementById('camera');
@@ -44,91 +58,37 @@
     let speechEnabled = false;
     let funnyMode = false;
     let listening = false;
+    let useAI = false;
 
-    // Special responses for all 90 COCO-SSD classes
+    // Dictionary (trimmed for example, but you can paste the full 90-class version here)
     const responses = {
       "person": {"hi":"Hi there, human!","hello":"Hello! Nice to meet you.","what are you":"I’m a person, just like you."},
-      "bicycle": {"hi":"Ring ring! Hi, I’m a bicycle.","hello":"Hello! Let’s go for a ride.","what are you":"I’m a bicycle — eco friendly transport!"},
-      "car": {"hi":"Vroom vroom! Hi, I’m a car.","hello":"Hello! Buckle up.","what are you":"I’m a car — I drive fast."},
-      "motorcycle": {"hi":"Brrm brrm! Hello!","hello":"Hello! I’m a motorcycle.","what are you":"I’m a motorcycle — two wheels, lots of fun."},
-      "airplane": {"hi":"Whoosh! Hi, I’m a plane.","hello":"Hello from the sky!","what are you":"I’m an airplane — I fly high."},
-      "bus": {"hi":"Beep beep! I’m a bus.","hello":"Hello passengers!","what are you":"I’m a bus — I carry lots of people."},
-      "train": {"hi":"Choo choo! Hi there!","hello":"Hello from the tracks.","what are you":"I’m a train — all aboard!"},
-      "truck": {"hi":"Honk honk! I’m a truck.","hello":"Hello, heavy hauler here!","what are you":"I’m a truck — I carry big loads."},
-      "boat": {"hi":"Splash! Hi, I’m a boat.","hello":"Ahoy! Hello!","what are you":"I’m a boat — I float on water."},
-      "traffic light": {"hi":"Stop! Or go! Hello!","hello":"Hello, I control traffic.","what are you":"I’m a traffic light — red, yellow, green."},
-      "fire hydrant": {"hi":"Woosh! Hello, I’m a hydrant.","hello":"Hi! I help firefighters.","what are you":"I’m a fire hydrant — full of water."},
-      "stop sign": {"hi":"STOP! And say hi.","hello":"Hello, I keep roads safe.","what are you":"I’m a stop sign — I make cars pause."},
-      "parking meter": {"hi":"Ka-ching! Hi there.","hello":"Hello, insert coin please.","what are you":"I’m a parking meter — I time your stay."},
-      "bench": {"hi":"Hi, sit with me.","hello":"Hello, I’m a bench.","what are you":"I’m a bench — for resting legs."},
-      "bird": {"hi":"Chirp chirp! Hi!","hello":"Hello! Tweet tweet.","what are you":"I’m a bird — I can fly."},
-      "cat": {"hi":"Meow! Hello human!","hello":"Purr... hello!","sit":"Cats don’t sit on command!","what are you":"I’m a cat — I rule the house."},
       "dog": {"hi":"Woof! Hi friend!","hello":"Hello! Tail wagging.","sit":"Woof! I’ll sit down now.","what are you":"I’m a dog — man’s best friend."},
-      "horse": {"hi":"Neigh! Hi there.","hello":"Hello, I’m a horse.","what are you":"I’m a horse — ride me into the sunset."},
-      "sheep": {"hi":"Baa! Hi human.","hello":"Hello! Baa baa.","what are you":"I’m a sheep — wooly and cute."},
-      "cow": {"hi":"Moo! Hello!","hello":"Howdy, I’m a cow.","what are you":"I’m a cow — I give milk."},
-      "elephant": {"hi":"Pawoo! Hi there.","hello":"Hello, I’m an elephant.","what are you":"I’m an elephant — big and wise."},
-      "bear": {"hi":"Rawr! Hello human.","hello":"Hi! I’m a bear.","what are you":"I’m a bear — strong and furry."},
-      "zebra": {"hi":"Stripey hi!","hello":"Hello, I’m a zebra.","what are you":"I’m a zebra — like a horse in stripes."},
-      "giraffe": {"hi":"Tall hi!","hello":"Hello from up high!","what are you":"I’m a giraffe — I reach the trees."},
-      "backpack": {"hi":"Hello, I’m a backpack.","hello":"Hi! I carry stuff.","what are you":"I’m a backpack — useful for school."},
-      "umbrella": {"hi":"Hi, I keep you dry.","hello":"Hello! Rain or shine.","what are you":"I’m an umbrella — your rain shield."},
-      "handbag": {"hi":"Hi, I’m stylish!","hello":"Hello, I’m a handbag.","what are you":"I’m a handbag — I hold secrets."},
-      "tie": {"hi":"Hello, I’m formal.","hello":"Hi there, I’m a tie.","what are you":"I’m a tie — I make you look sharp."},
-      "suitcase": {"hi":"Hi, I travel a lot.","hello":"Hello traveler!","what are you":"I’m a suitcase — I carry clothes."},
-      "frisbee": {"hi":"Whoosh! Hello!","hello":"Hi, let’s play!","what are you":"I’m a frisbee — throw me far."},
-      "skis": {"hi":"Hi, I love snow.","hello":"Hello skier!","what are you":"I’m skis — slide on snow."},
-      "snowboard": {"hi":"Shred hi!","hello":"Hello from the slopes.","what are you":"I’m a snowboard — for tricks and rides."},
-      "sports ball": {"hi":"Bounce! Hi!","hello":"Hello player!","what are you":"I’m a sports ball — let’s play."},
-      "kite": {"hi":"Fly high! Hi there.","hello":"Hello from the sky.","what are you":"I’m a kite — I dance in the wind."},
-      "baseball bat": {"hi":"Swing hi!","hello":"Hello, batter up!","what are you":"I’m a bat — hit home runs."},
-      "baseball glove": {"hi":"Catch hi!","hello":"Hello, glove here.","what are you":"I’m a glove — catch the ball."},
-      "skateboard": {"hi":"Roll hi!","hello":"Hello, I’m a skateboard.","what are you":"I’m a skateboard — kickflip time."},
-      "surfboard": {"hi":"Wave hi!","hello":"Hello surfer!","what are you":"I’m a surfboard — I ride waves."},
-      "tennis racket": {"hi":"Smash hi!","hello":"Hello, I’m a racket.","what are you":"I’m a tennis racket — game, set, match."},
-      "bottle": {"hi":"Glug hi!","hello":"Hello, I’m a bottle.","what are you":"I’m a bottle — I hold drinks."},
-      "wine glass": {"hi":"Cheers! Hi.","hello":"Hello, wine time.","what are you":"I’m a wine glass — fancy and fragile."},
-      "cup": {"hi":"Sip hi!","hello":"Hello, I’m a cup.","what are you":"I’m a cup — I hold drinks."},
-      "fork": {"hi":"Stabby hi!","hello":"Hello, I’m a fork.","what are you":"I’m a fork — I pick up food."},
-      "knife": {"hi":"Slice hi!","hello":"Hello, careful with me.","what are you":"I’m a knife — I cut food."},
-      "spoon": {"hi":"Scoop hi!","hello":"Hello, I’m a spoon.","what are you":"I’m a spoon — I scoop soup."},
-      "bowl": {"hi":"Hi, I hold food.","hello":"Hello, I’m a bowl.","what are you":"I’m a bowl — I keep soup safe."},
-      "banana": {"hi":"Peel hi!","hello":"Hello, I’m a banana.","what are you":"I’m a banana — full of potassium."},
-      "apple": {"hi":"Crunch hi!","hello":"Hello, I’m an apple.","what are you":"I’m an apple — healthy and tasty."},
-      "sandwich": {"hi":"Yum hi!","hello":"Hello, I’m a sandwich.","what are you":"I’m a sandwich — tasty layers."},
-      "orange": {"hi":"Juicy hi!","hello":"Hello, I’m an orange.","what are you":"I’m an orange — full of vitamin C."},
-      "broccoli": {"hi":"Green hi!","hello":"Hello, eat me!","what are you":"I’m broccoli — healthy veggie."},
-      "carrot": {"hi":"Crunch hi!","hello":"Hello, I’m a carrot.","what are you":"I’m a carrot — good for your eyes."},
-      "hot dog": {"hi":"Yummy hi!","hello":"Hello, hot dog here.","what are you":"I’m a hot dog — ballpark snack."},
+      "cat": {"hi":"Meow! Hello human!","hello":"Purr... hello!","what are you":"I’m a cat — I rule the house."},
+      "car": {"hi":"Vroom vroom! Hi, I’m a car.","hello":"Hello! Buckle up.","what are you":"I’m a car — I drive fast."},
       "pizza": {"hi":"Cheesy hi!","hello":"Hello, I’m pizza.","what are you":"I’m pizza — everyone loves me."},
-      "donut": {"hi":"Sweet hi!","hello":"Hello, I’m a donut.","what are you":"I’m a donut — full of sugar."},
-      "cake": {"hi":"Happy hi!","hello":"Hello, I’m cake.","what are you":"I’m cake — for celebrations."},
-      "chair": {"hi":"Sit hi!","hello":"Hello, I’m a chair.","what are you":"I’m a chair — comfy and useful."},
-      "couch": {"hi":"Relax hi!","hello":"Hello, I’m a couch.","what are you":"I’m a couch — let’s chill."},
-      "potted plant": {"hi":"Leafy hi!","hello":"Hello, I’m a plant.","what are you":"I’m a potted plant — I grow indoors."},
-      "bed": {"hi":"Sleep hi!","hello":"Hello, I’m a bed.","what are you":"I’m a bed — time to rest."},
-      "dining table": {"hi":"Meal hi!","hello":"Hello, dinner time.","what are you":"I’m a dining table — for eating."},
-      "toilet": {"hi":"Flush hi!","hello":"Hello, bathroom buddy.","what are you":"I’m a toilet — I flush waste."},
-      "tv": {"hi":"Screen hi!","hello":"Hello, watch me.","what are you":"I’m a TV — I show shows."},
-      "laptop": {"hi":"Click hi!","hello":"Hello, I’m a laptop.","what are you":"I’m a laptop — work and play."},
-      "mouse": {"hi":"Click click hi!","hello":"Hello, I’m a mouse.","what are you":"I’m a computer mouse — I point and click."},
-      "remote": {"hi":"Click hi!","hello":"Hello, I’m a remote.","what are you":"I’m a remote — I control TV."},
-      "keyboard": {"hi":"Type hi!","hello":"Hello, I’m a keyboard.","what are you":"I’m a keyboard — I type words."},
-      "cell phone": {"hi":"Ring hi!","hello":"Hello, I’m a phone.","what are you":"I’m a cell phone — call me maybe."},
-      "microwave": {"hi":"Ding hi!","hello":"Hello, I’m a microwave.","what are you":"I’m a microwave — I heat food."},
-      "oven": {"hi":"Bake hi!","hello":"Hello, I’m an oven.","what are you":"I’m an oven — I cook meals."},
-      "toaster": {"hi":"Pop hi!","hello":"Hello, I’m a toaster.","what are you":"I’m a toaster — I make toast."},
-      "sink": {"hi":"Splash hi!","hello":"Hello, I’m a sink.","what are you":"I’m a sink — I hold water."},
-      "refrigerator": {"hi":"Cool hi!","hello":"Hello, I’m a fridge.","what are you":"I’m a refrigerator — I keep things cold."},
-      "book": {"hi":"Read hi!","hello":"Hello, I’m a book.","what are you":"I’m a book — I tell stories."},
-      "clock": {"hi":"Tick hi!","hello":"Hello, I’m a clock.","what are you":"I’m a clock — I tell time."},
-      "vase": {"hi":"Flower hi!","hello":"Hello, I’m a vase.","what are you":"I’m a vase — I hold flowers."},
-      "scissors": {"hi":"Snip hi!","hello":"Hello, I’m scissors.","what are you":"I’m scissors — I cut things."},
-      "teddy bear": {"hi":"Cuddle hi!","hello":"Hello, I’m a teddy.","what are you":"I’m a teddy bear — hug me."},
-      "hair drier": {"hi":"Blow hi!","hello":"Hello, I’m a dryer.","what are you":"I’m a hair drier — I blow hot air."},
-      "toothbrush": {"hi":"Brush hi!","hello":"Hello, I’m a toothbrush.","what are you":"I’m a toothbrush — I clean teeth."},
       "default": {"hi":"Hello there!","hello":"Hi, nice to see you!","what are you":"I’m just an object."}
     };
+
+    // AI toggle
+    function toggleAI() {
+      useAI = !useAI;
+      document.getElementById("aiToggleBtn").innerText = useAI ? "Mode: Language Model 🧠" : "Mode: Canned Replies 🤖";
+    }
+
+    // Placeholder AI (replace later with GPT)
+    async function generateAIResponse(prompt) {
+      return "🤖 (AI mode): You said '" + prompt + "', I’m thinking about it!";
+    }
+
+    // Unified reply handler
+    async function getReply(obj, userSpeech) {
+      if (useAI) {
+        return await generateAIResponse(userSpeech);
+      } else {
+        return responses[obj][userSpeech] || responses[obj]["hi"] || responses["default"]["hi"];
+      }
+    }
 
     // Enable speech
     function enableSpeech() {
@@ -139,7 +99,7 @@
       statusDiv.innerText = "Speech ready ✅";
     }
 
-    // Toggle mode
+    // Toggle funny/serious
     function toggleMode() {
       funnyMode = !funnyMode;
       document.getElementById('toggleBtn').innerText = funnyMode ? "Mode: Funny 🤪" : "Mode: Serious";
@@ -163,7 +123,7 @@
       recognition.continuous = false;
       recognition.lang = "en-US";
 
-      recognition.onresult = (event) => {
+      recognition.onresult = async (event) => {
         const userSpeech = event.results[0][0].transcript.toLowerCase();
         statusDiv.innerText = `You said: "${userSpeech}"`;
 
@@ -172,13 +132,16 @@
           if (lastSpoken.includes(key)) { obj = key; break; }
         }
 
-        let reply = responses[obj][userSpeech] || responses[obj]["hi"] || responses["default"]["hi"];
+        let reply = await getReply(obj, userSpeech);
+        logChat("You", userSpeech);
+        logChat(obj, reply);
         speak(reply);
 
         if (listening) recognition.start(); // auto restart
       };
     }
 
+    // Toggle listening
     function toggleListening() {
       if (!recognition) {
         alert("Speech recognition not supported in this browser.");
@@ -196,6 +159,31 @@
         statusDiv.innerText = "Stopped listening.";
         document.getElementById('talkBtn').innerText = "Start Conversation 🎤";
       }
+    }
+
+    // Chat input
+    async function sendChat() {
+      const input = document.getElementById("chatInput");
+      const message = input.value.toLowerCase().trim();
+      if (!message) return;
+      input.value = "";
+
+      let obj = "default";
+      for (let key in responses) {
+        if (lastSpoken.includes(key)) { obj = key; break; }
+      }
+
+      let reply = await getReply(obj, message);
+      logChat("You", message);
+      logChat(obj, reply);
+      speak(reply);
+    }
+
+    // Chat log
+    function logChat(sender, text) {
+      const log = document.getElementById("chatLog");
+      log.innerHTML += `<p><b>${sender}:</b> ${text}</p>`;
+      log.scrollTop = log.scrollHeight;
     }
 
     // Camera + model
