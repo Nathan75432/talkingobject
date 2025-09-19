@@ -7,7 +7,9 @@
     body { margin: 0; text-align: center; background: #111; color: white; font-family: sans-serif; }
     video, canvas { width: 100%; max-width: 480px; margin-top: 10px; border-radius: 12px; }
     #status { margin: 10px; font-size: 18px; }
-    button { margin: 10px; padding: 10px 20px; font-size: 16px; border: none; border-radius: 8px; background: lime; color: black; cursor: pointer; }
+    button { margin: 5px; padding: 10px 20px; font-size: 16px; border: none; border-radius: 8px; cursor: pointer; }
+    #startBtn { background: lime; color: black; }
+    #toggleBtn { background: dodgerblue; color: white; }
   </style>
   <!-- TensorFlow.js -->
   <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@latest"></script>
@@ -16,7 +18,8 @@
 </head>
 <body>
   <h1>Talking Object Detector 🤖</h1>
-  <button onclick="enableSpeech()">Start Talking 🔊</button>
+  <button id="startBtn" onclick="enableSpeech()">Start Talking 🔊</button>
+  <button id="toggleBtn" onclick="toggleMode()">Mode: Serious</button>
   <video id="camera" autoplay playsinline muted></video>
   <canvas id="overlay"></canvas>
   <div id="status">Loading model...</div>
@@ -28,14 +31,23 @@
     const statusDiv = document.getElementById('status');
     let model;
 
-    // Remember last spoken object + time
+    // State
     let lastSpoken = "";
     let lastSpokenTime = 0;
-    const cooldown = 5000; // 5 seconds
-
+    const cooldown = 5000; // ms
     let speechEnabled = false;
+    let funnyMode = false;
 
-    // 1. Access camera
+    // Funny phrases dictionary
+    const phrases = {
+      "cat": ["Meow!", "I’m a cat!", "Pet me human!"],
+      "dog": ["Woof woof!", "I’m a dog!", "Throw the ball!"],
+      "person": ["Hello there!", "I see you!", "Looking good today!"],
+      "book": ["I am a book!", "Read me!", "Knowledge is power!"],
+      "chair": ["I’m a chair!", "Take a seat!", "Rest those legs!"]
+    };
+
+    // 1. Camera setup
     async function initCamera() {
       const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } });
       video.srcObject = stream;
@@ -47,7 +59,7 @@
       });
     }
 
-    // 2. Load COCO-SSD
+    // 2. Load model
     async function loadModel() {
       try {
         model = await cocoSsd.load();
@@ -58,7 +70,7 @@
       }
     }
 
-    // 3. Enable speech (must tap once on iOS)
+    // 3. Enable speech
     function enableSpeech() {
       const msg = new SpeechSynthesisUtterance("Speech enabled");
       msg.lang = "en-US";
@@ -67,19 +79,23 @@
       statusDiv.innerText = "Speech ready ✅";
     }
 
-    // 4. Speech function
-    function speak(text) {
-      if (!speechEnabled) return;
-      if (!window.speechSynthesis) return;
+    // 4. Toggle mode
+    function toggleMode() {
+      funnyMode = !funnyMode;
+      document.getElementById('toggleBtn').innerText = funnyMode ? "Mode: Funny 🤪" : "Mode: Serious";
+    }
 
-      window.speechSynthesis.cancel(); // cancel any ongoing speech
+    // 5. Speech function
+    function speak(text) {
+      if (!speechEnabled || !window.speechSynthesis) return;
+      window.speechSynthesis.cancel();
       const msg = new SpeechSynthesisUtterance(text);
       msg.lang = "en-US";
       msg.rate = 0.9;
       window.speechSynthesis.speak(msg);
     }
 
-    // 5. Detection loop
+    // 6. Detection loop
     async function detectLoop() {
       if (!model) return;
 
@@ -89,7 +105,6 @@
 
       if (predictions.length > 0) {
         predictions.forEach(pred => {
-          // Draw box
           ctx.strokeStyle = "lime";
           ctx.lineWidth = 2;
           ctx.strokeRect(...pred.bbox);
@@ -97,12 +112,18 @@
           ctx.fillText(`${pred.class} (${Math.round(pred.score*100)}%)`, pred.bbox[0], pred.bbox[1] > 10 ? pred.bbox[1]-5 : 10);
         });
 
-        const best = predictions[0]; // highest confidence
+        const best = predictions[0];
         const now = Date.now();
 
         if (best.score > 0.6) {
           if (best.class !== lastSpoken || (now - lastSpokenTime) > cooldown) {
-            speak(`I see a ${best.class}`);
+            let phrase;
+            if (funnyMode && phrases[best.class]) {
+              phrase = phrases[best.class][Math.floor(Math.random() * phrases[best.class].length)];
+            } else {
+              phrase = `I see a ${best.class}`;
+            }
+            speak(phrase);
             statusDiv.innerText = `Detected: ${best.class}`;
             lastSpoken = best.class;
             lastSpokenTime = now;
@@ -115,7 +136,7 @@
       requestAnimationFrame(detectLoop);
     }
 
-    // 6. Initialize
+    // 7. Init
     (async () => {
       await initCamera();
       await loadModel();
